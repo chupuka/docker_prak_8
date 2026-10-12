@@ -1,7 +1,5 @@
-# locustfile.py - нагрузочные тесты для курсача "Навигатор" (Navigator.API)
-# запуск с интерфейсом: locust -f locustfile.py --host=http://127.0.0.1:5000
-# потом открыть http://localhost:8089, выставить 100 юзеров и запустить
-# запуск без интерфейса: locust -f locustfile.py --host=http://127.0.0.1:5000 --headless -u 100 -r 10 -t 3m
+# locust -f locustfile.py --host=http://127.0.0.1:5000
+# locust -f locustfile.py --host=http://127.0.0.1:5000 --headless -u 100 -r 10 -t 3m
 
 from locust import HttpUser, TaskSet, SequentialTaskSet, task, between
 from faker import Faker
@@ -9,31 +7,30 @@ import random
 
 fake = Faker('ru_RU')
 
-# слова для поиска, обычные, как их вводят живые люди
+# слова для поиска
 SEARCH_WORDS = ["кафе", "парк", "музей", "метро", "аптека", "магазин", "отель", "площадь", "театр", "школа"]
 
-MAX_POINT_ID = 180  # столько точек сейчас в базе
-MAX_CATEGORY_ID = 8  # а столько категорий
+MAX_POINT_ID = 180  # точек в базе
+MAX_CATEGORY_ID = 8  # категорий в базе
 
 
 def random_password():
-    # пароль по требованиям апи: маленькие + большая буквы и цифра, минимум 8 символов
+    # пароль под апи
     return "Pass%dAa" % random.randint(10000, 99999)
 
 
 def random_phone():
-    # телефон строго в формате +7 и 10 цифр, иначе апи ругается
+    # телефон +7
     return "+7%010d" % random.randint(0, 9999999999)
 
 
 def moscow_coords():
-    # случайная точка где-то по Москве
+    # точка по Москве
     return round(random.uniform(55.5, 56.0), 6), round(random.uniform(37.3, 37.9), 6)
 
 
 def register(taskset):
-    # регистрируем нового пользователя и запоминаем токен на юзере,
-    # чтобы не регистрироваться перед каждым запросом
+    # регистрация и токен
     user = taskset.user
     if getattr(user, "token", None):
         taskset.client.headers.update({"Authorization": "Bearer " + user.token})
@@ -56,7 +53,7 @@ def register(taskset):
 
 
 def ok(response, what):
-    # проверяем ответ апи: должен быть 200 и success=true, иначе помечаем как fail
+    # проверка ответа
     try:
         body = response.json()
     except ValueError:
@@ -70,7 +67,7 @@ def ok(response, what):
 
 
 class BrowseBehavior(TaskSet):
-    # гость без регистрации, просто смотрит карту. 5 задач на чтение
+    # гость, только чтение
 
     @task(10)
     def categories(self):
@@ -82,7 +79,7 @@ class BrowseBehavior(TaskSet):
         cat_id = random.randint(1, MAX_CATEGORY_ID)
         with self.client.get("/api/categories/%d" % cat_id, name="/api/categories/[id]", catch_response=True) as r:
             if r.status_code == 404:
-                r.success()  # такой категории нет, это нормально
+                r.success()  # нет такой категории
             else:
                 ok(r, "category_card")
 
@@ -111,8 +108,7 @@ class BrowseBehavior(TaskSet):
 
 
 class MemberActions(TaskSet):
-    # залогиненный пользователь. читает много, пишет мало:
-    # у чтения вес 10, у записи 1-2, то есть чтение чаще минимум в 5 раз
+    # чтение чаще записи
 
     def on_start(self):
         register(self)
@@ -153,7 +149,7 @@ class MemberActions(TaskSet):
 
     @task(2)
     def create_route(self):
-        # сохранить маршрут в историю
+        # сохранить маршрут
         if not register(self):
             return
         s_lat, s_lon = moscow_coords()
@@ -170,7 +166,7 @@ class MemberActions(TaskSet):
 
     @task(1)
     def build_route(self):
-        # построить маршрут на карте
+        # построить маршрут
         if not register(self):
             return
         s_lat, s_lon = moscow_coords()
@@ -185,7 +181,7 @@ class MemberActions(TaskSet):
 
     @task(1)
     def add_favorite(self):
-        # добавить случайную точку в избранное
+        # точка в избранное
         if not register(self):
             return
         poi_id = random.randint(1, MAX_POINT_ID)
@@ -195,7 +191,7 @@ class MemberActions(TaskSet):
 
     @task(1)
     def log_event(self):
-        # кинуть событие в аналитику
+        # событие в аналитику
         if not register(self):
             return
         payload = {
@@ -208,9 +204,7 @@ class MemberActions(TaskSet):
 
 
 class UserJourney(SequentialTaskSet):
-    # сценарий живого пользователя строго по шагам:
-    # список -> карточка -> поиск -> построил и сохранил -> история -> избранное
-    # в отличие от TaskSet тут порядок фиксированный, веса не работают
+    # сценарий по шагам
 
     def on_start(self):
         register(self)
@@ -272,12 +266,12 @@ class UserJourney(SequentialTaskSet):
 
 
 class GuestUser(HttpUser):
-    # гость только смотрит, ничего не пишет
+    # только смотрит
     tasks = [BrowseBehavior]
     wait_time = between(1, 3)
 
 
 class MemberUser(HttpUser):
-    # залогиненный: в основном читает (MemberActions), иногда идет по сценарию (UserJourney)
+    # чтение и сценарий
     tasks = {MemberActions: 3, UserJourney: 1}
     wait_time = between(1, 3)
